@@ -1,7 +1,8 @@
 @echo off
+
 start java SecureRandomServer 7000
 start java Reducer 6100
-timeout /t 1
+timeout /t 2
 start java Worker 5000 127.0.0.1 7000
 start java Worker 5001 127.0.0.1 7000
 start java Worker 5002 127.0.0.1 7000

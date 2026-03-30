@@ -45,6 +45,17 @@ public class WorkerHandler extends Thread {
     private Message handleRequest(Message request) {
         try {
             String type = request.getType();
+            //new
+            if("RATE_GAME".equals(type)){
+                String gameName=request.getContent();
+                Integer stars=(Integer) request.getPayload();
+                boolean rated = Worker.addRating(gameName, stars);
+                if (!rated) {
+                    return new Message("ERROR", "Game not found: " + gameName);
+                }
+                return new Message("SUCCESS", "Game rated: " + gameName + " -> " + stars);
+            }
+            
             if ("ADD_GAME".equals(type)) {
                 if (!(request.getPayload() instanceof Game)) {
                     return new Message("ERROR", "ADD_GAME payload must be Game");

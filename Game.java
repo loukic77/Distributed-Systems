@@ -75,6 +75,7 @@ public class Game implements Serializable {
         this.totalBetAmount = 0.0;
         this.totalBets = 0;
         this.playerProfitLoss = new HashMap<String, Double>();
+        this.totalRatingSum = stars * noOfVotes; //new
     }
 
     public synchronized BetResult applyBet(String playerId, double amount, int randomNumber) {
@@ -140,17 +141,18 @@ public class Game implements Serializable {
         this.riskLevel = normalizeRiskLevel(newRiskLevel);
         this.jackpot = computeJackpot(this.riskLevel);
     }
-
+    //new
+    private int totalRatingSum = 0;
     public synchronized void addRating(int newStars) {
         if (newStars < 1 || newStars > 5) {
             throw new IllegalArgumentException("Rating must be in range [1, 5]");
         }
 
-        int totalRating = (this.stars * this.noOfVotes) + newStars;
+        this.totalRatingSum += newStars;
         this.noOfVotes += 1;
-        this.stars = Math.round((float) totalRating / (float) this.noOfVotes);
+        this.stars = Math.round((float) this.totalRatingSum / (float) this.noOfVotes);
     }
-
+    
     public String getGameName() {
         return gameName;
     }

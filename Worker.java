@@ -22,6 +22,15 @@ public class Worker {
 
     ServerSocket providerSocket;
     Socket connection = null;
+    //new    
+    public static synchronized boolean addRating(String gameName, int stars) {
+        Game g = GAME_STORE.get(gameName);
+        if (g == null) {
+            return false;
+        }
+        g.addRating(stars);
+        return true;
+    }     
 
     public static synchronized boolean addGame(Game game) {
         if (game == null) {

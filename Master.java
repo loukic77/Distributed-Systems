@@ -1,12 +1,12 @@
 import java.io.EOFException;
-import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
-import java.util.HashMap;
+//import java.util.HashMap; not used apparently
 import java.util.List;
+import java.io.IOException;
 
 public class Master {
     private static final int BASE_WORKER_PORT = 5000;
@@ -76,15 +76,17 @@ public class Master {
     }
 
     private void startClientServer() throws IOException {
-        ServerSocket serverSocket = new ServerSocket(masterPort);
+        
         System.out.println("Master listening for clients on port " + masterPort);
-
-        while (true) {
-            Socket client = serverSocket.accept();
-            Thread t = new MasterClientHandler(client, this);
-            t.start();
+        try(ServerSocket serverSocket = new ServerSocket(masterPort)){
+            while (true) {
+                Socket client = serverSocket.accept();
+                Thread t = new MasterClientHandler(client, this);
+                t.start();
+            }
         }
     }
+    
 
     public Message handleClientRequest(Message request) {
         try {
@@ -151,6 +153,13 @@ public class Master {
 
             if ("PING".equals(type)) {
                 return new Message("SUCCESS", "PONG");
+            }
+            //new
+            if ("PLAYER_RATE".equals(type)) {
+                String gameName = request.getContent();
+                Integer stars = (Integer) request.getPayload();
+                int workerIdx = getWorkerIndexForGame(gameName);
+                return sendToWorker(workerIdx, new Message("RATE_GAME", gameName, stars));
             }
 
             return new Message("ERROR", "Unknown client request type: " + type);
@@ -281,7 +290,7 @@ public class Master {
                 }
             }
 
-            ArrayList<Message> list = new ArrayList<Message>();
+            ArrayList<Message> list = new ArrayList<>();//new
             for (Message result : results) {
                 if (result == null) {
                     list.add(new Message("ERROR", "Missing map output"));

@@ -77,6 +77,13 @@ public class DummyPlayerConsole {
             BetRequest req = new BetRequest(parts[1], parts[2], Double.parseDouble(parts[3]));
             return new Message("PLAYER_PLAY", req.getGameName(), req);
         }
+        //new
+        if ("rate".equals(cmd)) {
+            if (parts.length < 3) {
+                throw new IllegalArgumentException("rate <gameName> <stars>");
+            }
+            return new Message("PLAYER_RATE", parts[1], Integer.parseInt(parts[2]));
+        }
 
         throw new IllegalArgumentException("Unknown command: " + cmd);
     }
@@ -108,5 +115,6 @@ public class DummyPlayerConsole {
         System.out.println("  search <minStars> <risk|*> <betCategory|*>");
         System.out.println("  play <playerId> <gameName> <amount>");
         System.out.println("  quit");
+        System.out.println("  rate <gameName> <stars>");
     }
 }
