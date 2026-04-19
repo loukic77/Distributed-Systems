@@ -1,5 +1,6 @@
 import java.io.*;
 import java.net.*;
+import java.util.HashMap;
 import java.util.List;
 
 public class WorkerHandler extends Thread {
@@ -45,6 +46,43 @@ public class WorkerHandler extends Thread {
     private Message handleRequest(Message request) {
         try {
             String type = request.getType();
+            if ("MAP_TO_REDUCER".equals(type)) {
+                if (!(request.getPayload() instanceof HashMap)) {
+                    return new Message("ERROR", "MAP_TO_REDUCER payload must be HashMap");
+                }
+
+                HashMap<?, ?> task = (HashMap<?, ?>) request.getPayload();
+                Object mapTypeObj = task.get("mapType");
+                Object contentObj = task.get("content");
+                Object payloadObj = task.get("payload");
+                Object mapIdObj = task.get("mapId");
+                Object reduceTypeObj = task.get("reduceType");
+                Object reducerHostObj = task.get("reducerHost");
+                Object reducerPortObj = task.get("reducerPort");
+
+                if (!(mapTypeObj instanceof String) || !(mapIdObj instanceof String)
+                        || !(reduceTypeObj instanceof String) || !(reducerHostObj instanceof String)
+                        || !(reducerPortObj instanceof Integer)) {
+                    return new Message("ERROR", "Invalid MAP_TO_REDUCER task fields");
+                }
+
+                String mapType = (String) mapTypeObj;
+                String content = contentObj instanceof String ? (String) contentObj : "";
+                String mapId = (String) mapIdObj;
+                String reduceType = (String) reduceTypeObj;
+                String reducerHost = (String) reducerHostObj;
+                int reducerPort = ((Integer) reducerPortObj).intValue();
+
+                Message mapResult = executeMapOperation(mapType, content, payloadObj);
+
+                ReducerClient reducerClient = new ReducerClient(reducerHost, reducerPort);
+                Message ack = reducerClient.submitMapResult(mapId, reduceType, mapResult);
+                if (!"SUCCESS".equals(ack.getType())) {
+                    return ack;
+                }
+                return new Message("SUCCESS", "Map output submitted", mapId);
+            }
+
             //new
             if("RATE_GAME".equals(type)){
                 String gameName=request.getContent();
@@ -133,5 +171,31 @@ public class WorkerHandler extends Thread {
         } catch (IllegalStateException ex) {
             return new Message("ERROR", ex.getMessage());
         }
+    }
+
+    private Message executeMapOperation(String type, String content, Object payload) {
+        if ("LIST_ACTIVE_GAME_INFO".equals(type)) {
+            List<GameInfo> games = Worker.listActiveGameInfo();
+            return new Message("SUCCESS", "Active games listed", games);
+        }
+
+        if ("SEARCH_GAMES".equals(type)) {
+            if (!(payload instanceof SearchFilter)) {
+                return new Message("ERROR", "SEARCH_GAMES payload must be SearchFilter");
+            }
+            SearchFilter filter = (SearchFilter) payload;
+            List<GameInfo> games = Worker.searchGames(filter);
+            return new Message("SUCCESS", "Search map output", games);
+        }
+
+        if ("MAP_PROVIDER_PROFIT_LOSS".equals(type)) {
+            return new Message("SUCCESS", "Provider map output", Worker.mapProviderProfitLoss(content));
+        }
+
+        if ("MAP_PLAYER_PROFIT_LOSS".equals(type)) {
+            return new Message("SUCCESS", "Player map output", Worker.mapPlayerProfitLoss(content));
+        }
+
+        return new Message("ERROR", "Unknown map operation: " + type);
     }
 }

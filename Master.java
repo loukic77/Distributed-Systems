@@ -4,6 +4,8 @@ import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.UUID;
 //import java.util.HashMap; not used apparently
 import java.util.List;
 import java.io.IOException;
@@ -188,13 +190,11 @@ public class Master {
     }
 
     private Message reduceGameList(String mapOperation, String content) {
-        List<Message> mapResults = executeWorkerMap(mapOperation, content, null);
-        return reducerClient.reduce("REDUCE_GAME_LIST", "", mapResults);
+        return executeMapReduce("REDUCE_GAME_LIST", mapOperation, content, null);
     }
 
     private Message reduceSearch(SearchFilter filter) {
-        List<Message> mapResults = executeWorkerMap("SEARCH_GAMES", "", filter);
-        return reducerClient.reduce("REDUCE_SEARCH", "", mapResults);
+        return executeMapReduce("REDUCE_SEARCH", "SEARCH_GAMES", "", filter);
     }
 
     private Message reduceProviderReport(String providerName) {
@@ -202,8 +202,7 @@ public class Master {
             return new Message("ERROR", "Provider name is required");
         }
 
-        List<Message> mapResults = executeWorkerMap("MAP_PROVIDER_PROFIT_LOSS", providerName, null);
-        return reducerClient.reduce("REDUCE_PROVIDER_REPORT", providerName, mapResults);
+        return executeMapReduce("REDUCE_PROVIDER_REPORT", "MAP_PROVIDER_PROFIT_LOSS", providerName, null);
     }
 
     private Message reducePlayerReport(String playerId) {
@@ -211,11 +210,23 @@ public class Master {
             return new Message("ERROR", "Player id is required");
         }
 
-        List<Message> mapResults = executeWorkerMap("MAP_PLAYER_PROFIT_LOSS", playerId, null);
-        return reducerClient.reduce("REDUCE_PLAYER_REPORT", playerId, mapResults);
+        return executeMapReduce("REDUCE_PLAYER_REPORT", "MAP_PLAYER_PROFIT_LOSS", playerId, null);
     }
 
-    private List<Message> executeWorkerMap(String workerType, String content, Object payload) {
+    private Message executeMapReduce(String reduceType, String workerType, String content, Object payload) {
+        String mapId = UUID.randomUUID().toString();
+        List<Message> dispatchResults = executeWorkerMapToReducer(mapId, reduceType, workerType, content, payload);
+
+        for (Message dispatchResult : dispatchResults) {
+            if (!"SUCCESS".equals(dispatchResult.getType())) {
+                return dispatchResult;
+            }
+        }
+
+        return reducerClient.collectReduced(mapId, numWorkers);
+    }
+
+    private List<Message> executeWorkerMapToReducer(String mapId, String reduceType, String workerType, String content, Object payload) {
         final MapCollector collector = new MapCollector(numWorkers);
 
         for (int i = 0; i < numWorkers; i++) {
@@ -225,7 +236,15 @@ public class Master {
                 public void run() {
                     Message result;
                     try {
-                        result = sendToWorker(workerIdx, new Message(workerType, content, payload));
+                        HashMap<String, Object> task = new HashMap<String, Object>();
+                        task.put("mapId", mapId);
+                        task.put("reduceType", reduceType);
+                        task.put("mapType", workerType);
+                        task.put("content", content);
+                        task.put("payload", payload);
+                        task.put("reducerHost", reducerHost);
+                        task.put("reducerPort", Integer.valueOf(reducerPort));
+                        result = sendToWorker(workerIdx, new Message("MAP_TO_REDUCER", "", task));
                     } catch (EOFException ex) {
                         result = new Message("ERROR", "Worker disconnected: " + workerIdx);
                     } catch (IOException ex) {

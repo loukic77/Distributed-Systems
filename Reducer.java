@@ -10,6 +10,7 @@ import java.util.List;
 
 public class Reducer {
     private static final int DEFAULT_PORT = 6100;
+    private static final HashMap<String, ReduceJobState> JOBS = new HashMap<String, ReduceJobState>();
 
     private final int port;
 
@@ -87,84 +88,206 @@ public class Reducer {
         @SuppressWarnings("unchecked")
         private Message handleRequest(Message request) {
             try {
-                Object payload = request.getPayload();
-                if (!(payload instanceof List)) {
-                    return new Message("ERROR", "Reducer payload must be List<Message>");
-                }
-
-                List<?> rawList = (List<?>) payload;
-                ArrayList<Message> mapResults = new ArrayList<Message>();
-                for (Object item : rawList) {
-                    if (!(item instanceof Message)) {
-                        return new Message("ERROR", "Reducer payload contains invalid entry");
-                    }
-                    mapResults.add((Message) item);
-                }
-
-                String type = request.getType();
-                if ("REDUCE_GAME_LIST".equals(type) || "REDUCE_SEARCH".equals(type)) {
-                    ArrayList<GameInfo> reduced = new ArrayList<GameInfo>();
-                    for (Message result : mapResults) {
-                        if (!"SUCCESS".equals(result.getType())) {
-                            return result;
-                        }
-                        if (result.getPayload() instanceof List) {
-                            List<?> list = (List<?>) result.getPayload();
-                            for (Object item : list) {
-                                if (item instanceof GameInfo) {
-                                    reduced.add((GameInfo) item);
-                                }
-                            }
-                        }
-                    }
-                    String content = "REDUCE_GAME_LIST".equals(type) ? "MapReduce list complete" : "MapReduce search complete";
-                    return new Message("SUCCESS", content, reduced);
-                }
-
-                if ("REDUCE_PROVIDER_REPORT".equals(type) || "REDUCE_PLAYER_REPORT".equals(type)) {
-                    HashMap<String, Double> reduced = new HashMap<String, Double>();
-                    double total = 0.0;
-
-                    for (Message result : mapResults) {
-                        if (!"SUCCESS".equals(result.getType())) {
-                            return result;
-                        }
-                        if (result.getPayload() instanceof HashMap) {
-                            HashMap<?, ?> map = (HashMap<?, ?>) result.getPayload();
-                            for (Object key : map.keySet()) {
-                                if (!(key instanceof String)) {
-                                    continue;
-                                }
-                                Object value = map.get(key);
-                                if (!(value instanceof Double)) {
-                                    continue;
-                                }
-                                String gameName = (String) key;
-                                double gameValue = ((Double) value).doubleValue();
-                                Double prev = reduced.get(gameName);
-                                if (prev == null) {
-                                    prev = 0.0;
-                                }
-                                reduced.put(gameName, prev + gameValue);
-                            }
-                        }
+                if ("MAP_SUBMIT".equals(request.getType())) {
+                    if (!(request.getPayload() instanceof HashMap)) {
+                        return new Message("ERROR", "MAP_SUBMIT payload must be HashMap");
                     }
 
-                    for (double value : reduced.values()) {
-                        total += value;
+                    HashMap<?, ?> rawSubmission = (HashMap<?, ?>) request.getPayload();
+                    Object mapIdObj = rawSubmission.get("mapId");
+                    Object reduceTypeObj = rawSubmission.get("reduceType");
+                    Object mapResultObj = rawSubmission.get("mapResult");
+                    if (!(mapIdObj instanceof String) || !(reduceTypeObj instanceof String)
+                            || !(mapResultObj instanceof Message)) {
+                        return new Message("ERROR", "Invalid MAP_SUBMIT payload fields");
                     }
-                    reduced.put("TOTAL", total);
 
-                    String content = "REDUCE_PROVIDER_REPORT".equals(type)
-                        ? "MapReduce provider report complete"
-                        : "MapReduce player report complete";
-                    return new Message("SUCCESS", content, reduced);
+                    String mapId = (String) mapIdObj;
+                    String reduceType = (String) reduceTypeObj;
+                    Message mapResult = (Message) mapResultObj;
+                    Submission submission = new Submission(mapId, reduceType, mapResult);
+                    return acceptMapSubmission(submission);
                 }
 
-                return new Message("ERROR", "Unknown reducer operation: " + type);
+                if ("REDUCE_COLLECT".equals(request.getType())) {
+                    if (!(request.getPayload() instanceof Integer)) {
+                        return new Message("ERROR", "REDUCE_COLLECT payload must be Integer expected worker count");
+                    }
+                    int expectedCount = ((Integer) request.getPayload()).intValue();
+                    return collectReduced(request.getContent(), expectedCount);
+                }
+
+                return new Message("ERROR", "Unknown reducer request type: " + request.getType());
             } catch (Exception ex) {
                 return new Message("ERROR", ex.getMessage());
             }
+        }
+
+        private Message acceptMapSubmission(Submission submission) {
+            String mapId = submission.getMapId();
+            if (mapId == null || mapId.trim().isEmpty()) {
+                return new Message("ERROR", "Invalid map id");
+            }
+
+            synchronized (JOBS) {
+                ReduceJobState state = JOBS.get(mapId);
+                if (state == null) {
+                    state = new ReduceJobState(submission.getReduceType());
+                    JOBS.put(mapId, state);
+                }
+                state.add(submission.getMapResult());
+            }
+
+            return new Message("SUCCESS", "Map submission accepted", mapId);
+        }
+
+        private Message collectReduced(String mapId, int expectedCount) {
+            if (mapId == null || mapId.trim().isEmpty()) {
+                return new Message("ERROR", "Invalid map id");
+            }
+            if (expectedCount <= 0) {
+                return new Message("ERROR", "Expected worker count must be positive");
+            }
+
+            ReduceJobState state;
+            synchronized (JOBS) {
+                state = JOBS.get(mapId);
+                if (state == null) {
+                    state = new ReduceJobState(null);
+                    JOBS.put(mapId, state);
+                }
+            }
+
+            List<Message> mapResults = state.awaitAtLeast(expectedCount);
+            Message reduced = reduceByType(state.getReduceType(), mapResults);
+
+            synchronized (JOBS) {
+                JOBS.remove(mapId);
+            }
+            return reduced;
+        }
+
+        private Message reduceByType(String type, List<Message> mapResults) {
+            if (type == null || type.trim().isEmpty()) {
+                return new Message("ERROR", "Missing reduce type for job");
+            }
+
+            if ("REDUCE_GAME_LIST".equals(type) || "REDUCE_SEARCH".equals(type)) {
+                ArrayList<GameInfo> reduced = new ArrayList<GameInfo>();
+                for (Message result : mapResults) {
+                    if (!"SUCCESS".equals(result.getType())) {
+                        return result;
+                    }
+                    if (result.getPayload() instanceof List) {
+                        List<?> list = (List<?>) result.getPayload();
+                        for (Object item : list) {
+                            if (item instanceof GameInfo) {
+                                reduced.add((GameInfo) item);
+                            }
+                        }
+                    }
+                }
+                String content = "REDUCE_GAME_LIST".equals(type) ? "MapReduce list complete" : "MapReduce search complete";
+                return new Message("SUCCESS", content, reduced);
+            }
+
+            if ("REDUCE_PROVIDER_REPORT".equals(type) || "REDUCE_PLAYER_REPORT".equals(type)) {
+                HashMap<String, Double> reduced = new HashMap<String, Double>();
+                double total = 0.0;
+
+                for (Message result : mapResults) {
+                    if (!"SUCCESS".equals(result.getType())) {
+                        return result;
+                    }
+                    if (result.getPayload() instanceof HashMap) {
+                        HashMap<?, ?> map = (HashMap<?, ?>) result.getPayload();
+                        for (Object key : map.keySet()) {
+                            if (!(key instanceof String)) {
+                                continue;
+                            }
+                            Object value = map.get(key);
+                            if (!(value instanceof Double)) {
+                                continue;
+                            }
+                            String gameName = (String) key;
+                            double gameValue = ((Double) value).doubleValue();
+                            Double prev = reduced.get(gameName);
+                            if (prev == null) {
+                                prev = 0.0;
+                            }
+                            reduced.put(gameName, prev + gameValue);
+                        }
+                    }
+                }
+
+                for (double value : reduced.values()) {
+                    total += value;
+                }
+                reduced.put("TOTAL", total);
+
+                String content = "REDUCE_PROVIDER_REPORT".equals(type)
+                    ? "MapReduce provider report complete"
+                    : "MapReduce player report complete";
+                return new Message("SUCCESS", content, reduced);
+            }
+
+            return new Message("ERROR", "Unknown reducer operation: " + type);
+        }
+
+    }
+
+    private static class ReduceJobState {
+        private final String reduceType;
+        private final ArrayList<Message> mapResults;
+
+        ReduceJobState(String reduceType) {
+            this.reduceType = reduceType;
+            this.mapResults = new ArrayList<Message>();
+        }
+
+        public synchronized void add(Message mapResult) {
+            mapResults.add(mapResult);
+            notifyAll();
+        }
+
+        public synchronized List<Message> awaitAtLeast(int expectedCount) {
+            while (mapResults.size() < expectedCount) {
+                try {
+                    wait();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            return new ArrayList<Message>(mapResults);
+        }
+
+        public String getReduceType() {
+            return reduceType;
+        }
+    }
+
+    private static class Submission {
+        private final String mapId;
+        private final String reduceType;
+        private final Message mapResult;
+
+        Submission(String mapId, String reduceType, Message mapResult) {
+            this.mapId = mapId;
+            this.reduceType = reduceType;
+            this.mapResult = mapResult;
+        }
+
+        public String getMapId() {
+            return mapId;
+        }
+
+        public String getReduceType() {
+            return reduceType;
+        }
+
+        public Message getMapResult() {
+            return mapResult;
         }
     }
 }

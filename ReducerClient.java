@@ -2,7 +2,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
-import java.util.List;
+import java.util.HashMap;
 
 public class ReducerClient {
     private final String host;
@@ -19,11 +19,36 @@ public class ReducerClient {
         this.lock = new Object();
     }
 
-    public Message reduce(String type, String content, List<Message> mapResults) {
+    public Message submitMapResult(String mapId, String reduceType, Message mapResult) {
         synchronized (lock) {
             try {
                 ensureConnected();
-                out.writeObject(new Message(type, content, mapResults));
+                HashMap<String, Object> submission = new HashMap<String, Object>();
+                submission.put("mapId", mapId);
+                submission.put("reduceType", reduceType);
+                submission.put("mapResult", mapResult);
+                out.writeObject(new Message("MAP_SUBMIT", "", submission));
+                out.flush();
+
+                Object response = in.readObject();
+                if (!(response instanceof Message)) {
+                    throw new IllegalStateException("Invalid reducer response payload");
+                }
+                return (Message) response;
+            } catch (IOException ex) {
+                closeQuietly();
+                throw new IllegalStateException("Failed to communicate with Reducer", ex);
+            } catch (ClassNotFoundException ex) {
+                throw new IllegalStateException("Invalid reducer response class", ex);
+            }
+        }
+    }
+
+    public Message collectReduced(String mapId, int expectedCount) {
+        synchronized (lock) {
+            try {
+                ensureConnected();
+                out.writeObject(new Message("REDUCE_COLLECT", mapId, Integer.valueOf(expectedCount)));
                 out.flush();
 
                 Object response = in.readObject();
