@@ -9,6 +9,7 @@ import java.io.IOException;
 
 public class Master {
     private static final int BASE_WORKER_PORT = 5000;
+    private static final String DEFAULT_WORKER_HOST = "127.0.0.1";
     private static final int DEFAULT_MASTER_PORT = 6000;
     private static final int DEFAULT_REDUCER_PORT = 6100;
 
@@ -16,17 +17,21 @@ public class Master {
     private final int masterPort;
     private final String reducerHost;
     private final int reducerPort;
+    private final String[] workerHosts;
+    private final int[] workerPorts;
     private final Socket[] workerSockets;
     private final ObjectOutputStream[] workerOut;
     private final ObjectInputStream[] workerIn;
     private final Object[] workerLocks;
     private final ReducerClient reducerClient;
 
-    public Master(int numWorkers, int masterPort, String reducerHost, int reducerPort) {
+    public Master(int numWorkers, int masterPort, String reducerHost, int reducerPort, String[] workerHosts, int[] workerPorts) {
         this.numWorkers = numWorkers;
         this.masterPort = masterPort;
         this.reducerHost = reducerHost;
         this.reducerPort = reducerPort;
+        this.workerHosts = workerHosts;
+        this.workerPorts = workerPorts;
         this.workerSockets = new Socket[numWorkers];
         this.workerOut = new ObjectOutputStream[numWorkers];
         this.workerIn = new ObjectInputStream[numWorkers];
@@ -39,17 +44,58 @@ public class Master {
 
     public static void main(String[] args) {
         if (args.length < 1) {
-            System.err.println("Usage: java Master <numWorkers> [masterPort] [reducerHost] [reducerPort]");
+            System.err.println("Usage: java Master <numWorkers> [masterPort] [reducerHost] [reducerPort] [workerEndpoints]");
+            System.err.println("workerEndpoints format: host1:port1,host2:port2,... (must match numWorkers)");
             return;
         }
 
         int numWorkers = Integer.parseInt(args[0]);
         int masterPort = args.length >= 2 ? Integer.parseInt(args[1]) : DEFAULT_MASTER_PORT;
-        String reducerHost = args.length >= 3 ? args[2] : "127.0.0.1";
+        String reducerHost = args.length >= 3 ? args[2] : DEFAULT_WORKER_HOST;
         int reducerPort = args.length >= 4 ? Integer.parseInt(args[3]) : DEFAULT_REDUCER_PORT;
+        String[] workerHosts = new String[numWorkers];
+        int[] workerPorts = new int[numWorkers];
 
-        Master master = new Master(numWorkers, masterPort, reducerHost, reducerPort);
+        if (args.length >= 5) {
+            parseWorkerEndpoints(args[4], numWorkers, workerHosts, workerPorts);
+        } else {
+            for (int i = 0; i < numWorkers; i++) {
+                workerHosts[i] = DEFAULT_WORKER_HOST;
+                workerPorts[i] = BASE_WORKER_PORT + i;
+            }
+        }
+
+        Master master = new Master(numWorkers, masterPort, reducerHost, reducerPort, workerHosts, workerPorts);
         master.start();
+    }
+
+    private static void parseWorkerEndpoints(String endpointsArg, int numWorkers, String[] workerHosts, int[] workerPorts) {
+        String[] endpoints = endpointsArg.split(",");
+        if (endpoints.length != numWorkers) {
+            throw new IllegalArgumentException("workerEndpoints count must equal numWorkers");
+        }
+
+        for (int i = 0; i < endpoints.length; i++) {
+            String endpoint = endpoints[i].trim();
+            int separator = endpoint.lastIndexOf(':');
+            if (separator <= 0 || separator >= endpoint.length() - 1) {
+                throw new IllegalArgumentException("Invalid worker endpoint: " + endpoint + " (expected host:port)");
+            }
+
+            String host = endpoint.substring(0, separator).trim();
+            String portText = endpoint.substring(separator + 1).trim();
+            if (host.isEmpty()) {
+                throw new IllegalArgumentException("Worker host must not be empty");
+            }
+
+            int port = Integer.parseInt(portText);
+            if (port <= 0 || port > 65535) {
+                throw new IllegalArgumentException("Invalid worker port: " + port);
+            }
+
+            workerHosts[i] = host;
+            workerPorts[i] = port;
+        }
     }
 
     public void start() {
@@ -66,11 +112,12 @@ public class Master {
 
     private void connectWorkers() throws IOException {
         for (int i = 0; i < numWorkers; i++) {
-            int port = BASE_WORKER_PORT + i;
-            workerSockets[i] = new Socket("127.0.0.1", port);
+            String host = workerHosts[i];
+            int port = workerPorts[i];
+            workerSockets[i] = new Socket(host, port);
             workerOut[i] = new ObjectOutputStream(workerSockets[i].getOutputStream());
             workerIn[i] = new ObjectInputStream(workerSockets[i].getInputStream());
-            System.out.println("Master connected to Worker-" + i + " on port " + port);
+            System.out.println("Master connected to Worker-" + i + " on " + host + ":" + port);
         }
     }
 

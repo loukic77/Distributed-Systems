@@ -27,7 +27,13 @@ public class WorkerHandler extends Thread {
                 out.flush();
             }
         } catch (EOFException e) {
-        System.out.println("Master disconnected");
+            System.out.println("Master disconnected");
+        } catch (SocketException e) {
+            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
+                System.out.println("Master connection reset");
+            } else {
+                System.out.println("Worker socket error: " + e.getMessage());
+            }
         } catch (IOException e) {
 			e.printStackTrace();
 		} catch (ClassNotFoundException e) {

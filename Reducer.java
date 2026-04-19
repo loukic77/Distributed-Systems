@@ -4,6 +4,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -12,6 +13,7 @@ public class Reducer {
     private static final int DEFAULT_PORT = 6100;
     private static final HashMap<String, ReduceJobState> JOBS = new HashMap<String, ReduceJobState>();
     private static final HashMap<String, WaitingMaster> WAITING_MASTERS = new HashMap<String, WaitingMaster>();
+    private static final Object COMPLETION_LOCK = new Object();
 
     private final int port;
 
@@ -63,6 +65,12 @@ public class Reducer {
                     }
                 }
             } catch (EOFException ignored) {
+            } catch (SocketException ex) {
+                if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("connection reset")) {
+                    System.out.println("Reducer client connection reset");
+                } else {
+                    System.out.println("Reducer client socket error: " + ex.getMessage());
+                }
             } catch (IOException ex) {
                 ex.printStackTrace();
             } catch (ClassNotFoundException ex) {
@@ -138,7 +146,7 @@ public class Reducer {
                 return new Message("ERROR", "Invalid map id");
             }
 
-            synchronized (JOBS) {
+            synchronized (COMPLETION_LOCK) {
                 ReduceJobState state = JOBS.get(mapId);
                 if (state == null) {
                     state = new ReduceJobState(submission.getReduceType());
@@ -160,7 +168,7 @@ public class Reducer {
                 return new Message("ERROR", "Expected worker count must be positive");
             }
 
-            synchronized (WAITING_MASTERS) {
+            synchronized (COMPLETION_LOCK) {
                 WAITING_MASTERS.put(mapId, new WaitingMaster(expectedCount, out));
             }
 
@@ -169,40 +177,38 @@ public class Reducer {
         }
 
         private void tryCompleteAndNotify(String mapId) {
-            ReduceJobState state;
             WaitingMaster waiter;
+            String reduceType;
+            List<Message> mapResults;
 
-            synchronized (JOBS) {
-                state = JOBS.get(mapId);
-            }
-            if (state == null) {
-                return;
-            }
+            synchronized (COMPLETION_LOCK) {
+                ReduceJobState state = JOBS.get(mapId);
+                if (state == null) {
+                    return;
+                }
 
-            synchronized (WAITING_MASTERS) {
                 waiter = WAITING_MASTERS.get(mapId);
-            }
-            if (waiter == null) {
-                return;
+                if (waiter == null) {
+                    return;
+                }
+
+                if (state.size() < waiter.expectedCount) {
+                    return;
+                }
+
+                WAITING_MASTERS.remove(mapId);
+                JOBS.remove(mapId);
+
+                reduceType = state.getReduceType();
+                mapResults = state.snapshot();
             }
 
-            if (state.size() < waiter.expectedCount) {
-                return;
-            }
-
-            Message reduced = reduceByType(state.getReduceType(), state.snapshot());
+            Message reduced = reduceByType(reduceType, mapResults);
 
             try {
                 sendResponse(waiter.out, reduced);
             } catch (IOException ex) {
                 ex.printStackTrace();
-            }
-
-            synchronized (JOBS) {
-                JOBS.remove(mapId);
-            }
-            synchronized (WAITING_MASTERS) {
-                WAITING_MASTERS.remove(mapId);
             }
         }
 

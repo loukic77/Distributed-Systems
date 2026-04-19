@@ -2,6 +2,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.net.SocketException;
 import java.net.Socket;
 
 public class MasterClientHandler extends Thread {
@@ -35,6 +36,12 @@ public class MasterClientHandler extends Thread {
             }
         } catch (EOFException e) {
             System.out.println("Client disconnected");
+        } catch (SocketException e) {
+            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
+                System.out.println("Client connection reset");
+            } else {
+                System.out.println("Client socket error: " + e.getMessage());
+            }
         } catch (IOException e) {
             e.printStackTrace();
         } catch (ClassNotFoundException e) {
