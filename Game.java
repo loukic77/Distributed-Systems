@@ -1,4 +1,6 @@
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -102,25 +104,27 @@ public class Game implements Serializable {
             payout = amount * getRiskMultipliers()[indexUsed];
         }
 
-        double playerNet = payout - amount; //player earnings
-        double houseNet = amount - payout; //casino earnings
+        double roundedAmount = roundMoney(amount);
+        double roundedPayout = roundMoney(payout);
+        double playerNet = roundMoney(roundedPayout - roundedAmount);
+        double houseNet = roundMoney(-playerNet);
 
         totalBets++;
-        totalBetAmount += amount;
-        totalPayout += payout;
-        totalHouseProfitLoss += houseNet;
+        totalBetAmount = roundMoney(totalBetAmount + roundedAmount);
+        totalPayout = roundMoney(totalPayout + roundedPayout);
+        totalHouseProfitLoss = roundMoney(totalHouseProfitLoss + houseNet);
 
         Double prev = playerProfitLoss.get(playerId);
         if (prev == null) {
             prev = 0.0;
         }
-        playerProfitLoss.put(playerId, prev + playerNet);
+        playerProfitLoss.put(playerId, roundMoney(prev + playerNet));
 
         return new BetResult(
                 gameName,
                 playerId,
-                amount,
-                payout,
+                roundedAmount,
+                roundedPayout,
                 playerNet,
                 houseNet,
                 jackpotHit,
@@ -293,6 +297,10 @@ public class Game implements Serializable {
             return 20.0;
         }
         return 40.0;
+    }
+
+    private static double roundMoney(double value) {
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
     }
 
     public static class BetResult implements Serializable {

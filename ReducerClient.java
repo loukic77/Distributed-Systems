@@ -44,11 +44,11 @@ public class ReducerClient {
         }
     }
 
-    public Message collectReduced(String mapId, int expectedCount) {
+    public Message waitForReduced(String mapId, int expectedCount) {
         synchronized (lock) {
             try {
                 ensureConnected();
-                out.writeObject(new Message("REDUCE_COLLECT", mapId, Integer.valueOf(expectedCount)));
+                out.writeObject(new Message("REDUCE_WAIT", mapId, Integer.valueOf(expectedCount)));
                 out.flush();
 
                 Object response = in.readObject();

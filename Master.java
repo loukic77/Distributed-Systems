@@ -3,11 +3,8 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.UUID;
-//import java.util.HashMap; not used apparently
-import java.util.List;
 import java.io.IOException;
 
 public class Master {
@@ -156,7 +153,6 @@ public class Master {
             if ("PING".equals(type)) {
                 return new Message("SUCCESS", "PONG");
             }
-            //new
             if ("PLAYER_RATE".equals(type)) {
                 String gameName = request.getContent();
                 Integer stars = (Integer) request.getPayload();
@@ -215,26 +211,23 @@ public class Master {
 
     private Message executeMapReduce(String reduceType, String workerType, String content, Object payload) {
         String mapId = UUID.randomUUID().toString();
-        List<Message> dispatchResults = executeWorkerMapToReducer(mapId, reduceType, workerType, content, payload);
-
-        for (Message dispatchResult : dispatchResults) {
-            if (!"SUCCESS".equals(dispatchResult.getType())) {
-                return dispatchResult;
-            }
+        Message dispatchResult = dispatchWorkerMapToReducer(mapId, reduceType, workerType, content, payload);
+        if (!"SUCCESS".equals(dispatchResult.getType())) {
+            return dispatchResult;
         }
 
-        return reducerClient.collectReduced(mapId, numWorkers);
+        return reducerClient.waitForReduced(mapId, numWorkers);
     }
 
-    private List<Message> executeWorkerMapToReducer(String mapId, String reduceType, String workerType, String content, Object payload) {
-        final MapCollector collector = new MapCollector(numWorkers);
+    private Message dispatchWorkerMapToReducer(String mapId, String reduceType, String workerType, String content, Object payload) {
+        final Message[] dispatchResults = new Message[numWorkers];
+        Thread[] threads = new Thread[numWorkers];
 
         for (int i = 0; i < numWorkers; i++) {
             final int workerIdx = i;
-            Thread t = new Thread(new Runnable() {
+            threads[i] = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    Message result;
                     try {
                         HashMap<String, Object> task = new HashMap<String, Object>();
                         task.put("mapId", mapId);
@@ -244,21 +237,39 @@ public class Master {
                         task.put("payload", payload);
                         task.put("reducerHost", reducerHost);
                         task.put("reducerPort", Integer.valueOf(reducerPort));
-                        result = sendToWorker(workerIdx, new Message("MAP_TO_REDUCER", "", task));
+                        dispatchResults[workerIdx] = sendToWorker(workerIdx, new Message("MAP_TO_REDUCER", "", task));
                     } catch (EOFException ex) {
-                        result = new Message("ERROR", "Worker disconnected: " + workerIdx);
+                        dispatchResults[workerIdx] = new Message("ERROR", "Worker disconnected: " + workerIdx);
                     } catch (IOException ex) {
-                        result = new Message("ERROR", "Worker I/O error: " + ex.getMessage());
+                        dispatchResults[workerIdx] = new Message("ERROR", "Worker I/O error: " + ex.getMessage());
                     } catch (ClassNotFoundException ex) {
-                        result = new Message("ERROR", "Worker protocol error: " + ex.getMessage());
+                        dispatchResults[workerIdx] = new Message("ERROR", "Worker protocol error: " + ex.getMessage());
                     }
-                    collector.set(workerIdx, result);
                 }
             });
-            t.start();
+            threads[i].start();
         }
 
-        return collector.awaitAll();
+        for (int i = 0; i < numWorkers; i++) {
+            try {
+                threads[i].join();
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return new Message("ERROR", "Interrupted while waiting map dispatch completion");
+            }
+        }
+
+        for (int i = 0; i < numWorkers; i++) {
+            Message result = dispatchResults[i];
+            if (result == null) {
+                return new Message("ERROR", "Missing map dispatch result from worker: " + i);
+            }
+            if (!"SUCCESS".equals(result.getType())) {
+                return result;
+            }
+        }
+
+        return new Message("SUCCESS", "All map tasks submitted");
     }
 
     private void closeWorkerConnections() {
@@ -281,43 +292,6 @@ public class Master {
                 }
             } catch (IOException ignored) {
             }
-        }
-    }
-
-    private static class MapCollector {
-        private final Message[] results;
-        private int completed;
-
-        MapCollector(int size) {
-            this.results = new Message[size];
-            this.completed = 0;
-        }
-
-        public synchronized void set(int index, Message value) {
-            results[index] = value;
-            completed++;
-            notifyAll();
-        }
-
-        public synchronized List<Message> awaitAll() {
-            while (completed < results.length) {
-                try {
-                    wait();
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-
-            ArrayList<Message> list = new ArrayList<>();//new
-            for (Message result : results) {
-                if (result == null) {
-                    list.add(new Message("ERROR", "Missing map output"));
-                } else {
-                    list.add(result);
-                }
-            }
-            return list;
         }
     }
 }

@@ -11,6 +11,7 @@ import java.util.List;
 public class Reducer {
     private static final int DEFAULT_PORT = 6100;
     private static final HashMap<String, ReduceJobState> JOBS = new HashMap<String, ReduceJobState>();
+    private static final HashMap<String, WaitingMaster> WAITING_MASTERS = new HashMap<String, WaitingMaster>();
 
     private final int port;
 
@@ -56,9 +57,10 @@ public class Reducer {
 
                 while (true) {
                     Message request = (Message) in.readObject();
-                    Message response = handleRequest(request);
-                    out.writeObject(response);
-                    out.flush();
+                    Message response = handleRequest(request, out);
+                    if (response != null) {
+                        sendResponse(out, response);
+                    }
                 }
             } catch (EOFException ignored) {
             } catch (IOException ex) {
@@ -86,7 +88,7 @@ public class Reducer {
         }
 
         @SuppressWarnings("unchecked")
-        private Message handleRequest(Message request) {
+        private Message handleRequest(Message request, ObjectOutputStream out) {
             try {
                 if ("MAP_SUBMIT".equals(request.getType())) {
                     if (!(request.getPayload() instanceof HashMap)) {
@@ -109,17 +111,24 @@ public class Reducer {
                     return acceptMapSubmission(submission);
                 }
 
-                if ("REDUCE_COLLECT".equals(request.getType())) {
+                if ("REDUCE_WAIT".equals(request.getType())) {
                     if (!(request.getPayload() instanceof Integer)) {
-                        return new Message("ERROR", "REDUCE_COLLECT payload must be Integer expected worker count");
+                        return new Message("ERROR", "REDUCE_WAIT payload must be Integer expected worker count");
                     }
                     int expectedCount = ((Integer) request.getPayload()).intValue();
-                    return collectReduced(request.getContent(), expectedCount);
+                    return registerWaiter(request.getContent(), expectedCount, out);
                 }
 
                 return new Message("ERROR", "Unknown reducer request type: " + request.getType());
             } catch (Exception ex) {
                 return new Message("ERROR", ex.getMessage());
+            }
+        }
+
+        private void sendResponse(ObjectOutputStream out, Message response) throws IOException {
+            synchronized (out) {
+                out.writeObject(response);
+                out.flush();
             }
         }
 
@@ -138,10 +147,12 @@ public class Reducer {
                 state.add(submission.getMapResult());
             }
 
+            tryCompleteAndNotify(mapId);
+
             return new Message("SUCCESS", "Map submission accepted", mapId);
         }
 
-        private Message collectReduced(String mapId, int expectedCount) {
+        private Message registerWaiter(String mapId, int expectedCount, ObjectOutputStream out) {
             if (mapId == null || mapId.trim().isEmpty()) {
                 return new Message("ERROR", "Invalid map id");
             }
@@ -149,22 +160,50 @@ public class Reducer {
                 return new Message("ERROR", "Expected worker count must be positive");
             }
 
-            ReduceJobState state;
-            synchronized (JOBS) {
-                state = JOBS.get(mapId);
-                if (state == null) {
-                    state = new ReduceJobState(null);
-                    JOBS.put(mapId, state);
-                }
+            synchronized (WAITING_MASTERS) {
+                WAITING_MASTERS.put(mapId, new WaitingMaster(expectedCount, out));
             }
 
-            List<Message> mapResults = state.awaitAtLeast(expectedCount);
-            Message reduced = reduceByType(state.getReduceType(), mapResults);
+            tryCompleteAndNotify(mapId);
+            return null;
+        }
+
+        private void tryCompleteAndNotify(String mapId) {
+            ReduceJobState state;
+            WaitingMaster waiter;
+
+            synchronized (JOBS) {
+                state = JOBS.get(mapId);
+            }
+            if (state == null) {
+                return;
+            }
+
+            synchronized (WAITING_MASTERS) {
+                waiter = WAITING_MASTERS.get(mapId);
+            }
+            if (waiter == null) {
+                return;
+            }
+
+            if (state.size() < waiter.expectedCount) {
+                return;
+            }
+
+            Message reduced = reduceByType(state.getReduceType(), state.snapshot());
+
+            try {
+                sendResponse(waiter.out, reduced);
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
 
             synchronized (JOBS) {
                 JOBS.remove(mapId);
             }
-            return reduced;
+            synchronized (WAITING_MASTERS) {
+                WAITING_MASTERS.remove(mapId);
+            }
         }
 
         private Message reduceByType(String type, List<Message> mapResults) {
@@ -247,18 +286,13 @@ public class Reducer {
 
         public synchronized void add(Message mapResult) {
             mapResults.add(mapResult);
-            notifyAll();
         }
 
-        public synchronized List<Message> awaitAtLeast(int expectedCount) {
-            while (mapResults.size() < expectedCount) {
-                try {
-                    wait();
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
+        public synchronized int size() {
+            return mapResults.size();
+        }
+
+        public synchronized List<Message> snapshot() {
             return new ArrayList<Message>(mapResults);
         }
 
@@ -288,6 +322,16 @@ public class Reducer {
 
         public Message getMapResult() {
             return mapResult;
+        }
+    }
+
+    private static class WaitingMaster {
+        private final int expectedCount;
+        private final ObjectOutputStream out;
+
+        WaitingMaster(int expectedCount, ObjectOutputStream out) {
+            this.expectedCount = expectedCount;
+            this.out = out;
         }
     }
 }

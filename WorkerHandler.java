@@ -31,7 +31,6 @@ public class WorkerHandler extends Thread {
         } catch (IOException e) {
 			e.printStackTrace();
 		} catch (ClassNotFoundException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} finally {
 			try {
@@ -83,7 +82,6 @@ public class WorkerHandler extends Thread {
                 return new Message("SUCCESS", "Map output submitted", mapId);
             }
 
-            //new
             if("RATE_GAME".equals(type)){
                 String gameName=request.getContent();
                 Integer stars=(Integer) request.getPayload();
