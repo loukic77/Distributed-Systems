@@ -1,4 +1,4 @@
-package gr.aueb.dist.shared;
+package shared;
 
 import java.io.Serializable;
 import java.math.BigDecimal;

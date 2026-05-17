@@ -1,9 +1,9 @@
-import gr.aueb.dist.shared.BetRequest;
-import gr.aueb.dist.shared.Game;
-import gr.aueb.dist.shared.GameInfo;
-import gr.aueb.dist.shared.HashUtil;
-import gr.aueb.dist.shared.SRGValue;
-import gr.aueb.dist.shared.SearchFilter;
+import shared.BetRequest;
+import shared.Game;
+import shared.GameInfo;
+import shared.HashUtil;
+import shared.SRGValue;
+import shared.SearchFilter;
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;

@@ -1,5 +1,5 @@
-import gr.aueb.dist.shared.Message;
-import gr.aueb.dist.shared.SRGValue;
+import shared.Message;
+import shared.SRGValue;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
