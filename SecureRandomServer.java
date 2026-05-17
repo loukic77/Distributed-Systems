@@ -1,3 +1,6 @@
+import gr.aueb.dist.shared.HashUtil;
+import gr.aueb.dist.shared.Message;
+import gr.aueb.dist.shared.SRGValue;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.ObjectInputStream;

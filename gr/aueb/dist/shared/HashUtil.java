@@ -1,3 +1,5 @@
+package gr.aueb.dist.shared;
+
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 

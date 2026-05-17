@@ -1,3 +1,5 @@
+package gr.aueb.dist.shared;
+
 import java.io.Serializable;
 
 public class SearchFilter implements Serializable {

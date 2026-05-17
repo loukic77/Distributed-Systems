@@ -51,3 +51,10 @@ play user123 roulette 5
 
 java -cp . Master 3 6000 127.0.0.1 6100 127.0.0.1:5000,127.0.0.2:5001,127.0.0.3:5002   
 παραδειγμα αλλαγης ip για workers
+
+
+add roulette provider1 3 10 logo.png 0.1 10 low key123
+add blackjack provider1 4 15 blackjack.png 1 100 medium key456
+add slots provider2 5 20 slots.png 0.5 50 high key789
+add coinflip provider3 2 5 coinflip.png 0.1 5 low keyABC
+add dice provider4 3 8 dice.png 0.2 20 medium keyXYZ

@@ -1,3 +1,5 @@
+package gr.aueb.dist.shared;
+
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -24,11 +26,9 @@ public class Game implements Serializable {
     private String riskLevel;
     private final String hashKey;
 
-    // Derived fields (must not be provided by JSON).
     private final String betCategory;
     private double jackpot;
 
-    // Game visibility and in-memory statistics.
     private boolean active;
     private double totalHouseProfitLoss;
     private double totalPayout;
@@ -77,7 +77,7 @@ public class Game implements Serializable {
         this.totalBetAmount = 0.0;
         this.totalBets = 0;
         this.playerProfitLoss = new HashMap<String, Double>();
-        this.totalRatingSum = stars * noOfVotes; //new
+        this.totalRatingSum = stars * noOfVotes;
     }
 
     public synchronized BetResult applyBet(String playerId, double amount, int randomNumber) {
@@ -145,8 +145,9 @@ public class Game implements Serializable {
         this.riskLevel = normalizeRiskLevel(newRiskLevel);
         this.jackpot = computeJackpot(this.riskLevel);
     }
-    //new
+
     private int totalRatingSum = 0;
+
     public synchronized void addRating(int newStars) {
         if (newStars < 1 || newStars > 5) {
             throw new IllegalArgumentException("Rating must be in range [1, 5]");
@@ -156,7 +157,7 @@ public class Game implements Serializable {
         this.noOfVotes += 1;
         this.stars = Math.round((float) this.totalRatingSum / (float) this.noOfVotes);
     }
-    
+
     public String getGameName() {
         return gameName;
     }
@@ -315,6 +316,7 @@ public class Game implements Serializable {
         private final boolean jackpotHit;
         private final int multiplierIndex;
         private final int randomNumber;
+        private final double remainingBalance;
 
         public BetResult(
                 String gameName,
@@ -336,6 +338,31 @@ public class Game implements Serializable {
             this.jackpotHit = jackpotHit;
             this.multiplierIndex = multiplierIndex;
             this.randomNumber = randomNumber;
+            this.remainingBalance = Double.NaN;
+        }
+
+        public BetResult(
+                String gameName,
+                String playerId,
+                double betAmount,
+                double payout,
+                double playerNetProfitLoss,
+                double houseNetProfitLoss,
+                boolean jackpotHit,
+                int multiplierIndex,
+                int randomNumber,
+                double remainingBalance
+        ) {
+            this.gameName = gameName;
+            this.playerId = playerId;
+            this.betAmount = betAmount;
+            this.payout = payout;
+            this.playerNetProfitLoss = playerNetProfitLoss;
+            this.houseNetProfitLoss = houseNetProfitLoss;
+            this.jackpotHit = jackpotHit;
+            this.multiplierIndex = multiplierIndex;
+            this.randomNumber = randomNumber;
+            this.remainingBalance = remainingBalance;
         }
 
         public String getGameName() {
@@ -372,6 +399,10 @@ public class Game implements Serializable {
 
         public int getRandomNumber() {
             return randomNumber;
+        }
+
+        public double getRemainingBalance() {
+            return remainingBalance;
         }
     }
 }

@@ -1,3 +1,7 @@
+import gr.aueb.dist.shared.BetRequest;
+import gr.aueb.dist.shared.Game;
+import gr.aueb.dist.shared.Message;
+import gr.aueb.dist.shared.SearchFilter;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
@@ -85,6 +89,13 @@ public class DummyPlayerConsole {
             return new Message("PLAYER_RATE", parts[1], Integer.parseInt(parts[2]));
         }
 
+        if ("addbalance".equals(cmd)) {
+            if (parts.length < 3) {
+                throw new IllegalArgumentException("addbalance <playerId> <amount>");
+            }
+            return new Message("PLAYER_ADD_BALANCE", parts[1], Double.valueOf(parts[2]));
+        }
+
         throw new IllegalArgumentException("Unknown command: " + cmd);
     }
 
@@ -107,6 +118,9 @@ public class DummyPlayerConsole {
             System.out.println("  houseNet=" + bet.getHouseNetProfitLoss());
             System.out.println("  jackpotHit=" + bet.isJackpotHit());
             System.out.println("  random=" + bet.getRandomNumber());
+            if (!Double.isNaN(bet.getRemainingBalance())) {
+                System.out.println("  remainingBalance=" + bet.getRemainingBalance());
+            }
         }
     }
 
@@ -116,5 +130,6 @@ public class DummyPlayerConsole {
         System.out.println("  play <playerId> <gameName> <amount>");
         System.out.println("  quit");
         System.out.println("  rate <gameName> <stars>");
+        System.out.println("  addbalance <playerId> <amount>");
     }
 }

@@ -1,3 +1,8 @@
+import gr.aueb.dist.shared.BetRequest;
+import gr.aueb.dist.shared.Game;
+import gr.aueb.dist.shared.GameInfo;
+import gr.aueb.dist.shared.Message;
+import gr.aueb.dist.shared.SearchFilter;
 import java.io.EOFException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -24,6 +29,7 @@ public class Master {
     private final ObjectInputStream[] workerIn;
     private final Object[] workerLocks;
     private final ReducerClient reducerClient;
+    private final HashMap<String, Double> playerBalances = new HashMap<String, Double>();
 
     public Master(int numWorkers, int masterPort, String reducerHost, int reducerPort, String[] workerHosts, int[] workerPorts) {
         this.numWorkers = numWorkers;
@@ -185,8 +191,32 @@ public class Master {
                     return new Message("ERROR", "PLAYER_PLAY payload must be BetRequest");
                 }
                 BetRequest betRequest = (BetRequest) request.getPayload();
+                if (!reserveBalance(betRequest.getPlayerId(), betRequest.getAmount())) {
+                    return new Message("ERROR", "Insufficient balance for player: " + betRequest.getPlayerId());
+                }
                 int workerIdx = getWorkerIndexForGame(betRequest.getGameName());
-                return sendToWorker(workerIdx, new Message("PLAY_GAME", betRequest.getGameName(), betRequest));
+                Message response = sendToWorker(workerIdx, new Message("PLAY_GAME", betRequest.getGameName(), betRequest));
+                if ("SUCCESS".equals(response.getType()) && response.getPayload() instanceof Game.BetResult) {
+                    Game.BetResult result = (Game.BetResult) response.getPayload();
+                    addBalance(betRequest.getPlayerId(), result.getPayout());
+                    double remainingBalance = getBalance(betRequest.getPlayerId());
+                    Game.BetResult enriched = new Game.BetResult(
+                            result.getGameName(),
+                            result.getPlayerId(),
+                            result.getBetAmount(),
+                            result.getPayout(),
+                            result.getPlayerNetProfitLoss(),
+                            result.getHouseNetProfitLoss(),
+                            result.isJackpotHit(),
+                            result.getMultiplierIndex(),
+                            result.getRandomNumber(),
+                            remainingBalance
+                    );
+                    return new Message("SUCCESS", response.getContent(), enriched);
+                } else {
+                    addBalance(betRequest.getPlayerId(), betRequest.getAmount());
+                }
+                return response;
             }
 
             if ("MANAGER_PROVIDER_REPORT".equals(type) || "PROVIDER_REPORT".equals(type)) {
@@ -207,6 +237,19 @@ public class Master {
                 return sendToWorker(workerIdx, new Message("RATE_GAME", gameName, stars));
             }
 
+            if ("PLAYER_ADD_BALANCE".equals(type)) {
+                String playerId = request.getContent();
+                if (!(request.getPayload() instanceof Double)) {
+                    return new Message("ERROR", "PLAYER_ADD_BALANCE payload must be Double");
+                }
+                double amount = ((Double) request.getPayload()).doubleValue();
+                if (amount <= 0.0) {
+                    return new Message("ERROR", "Balance amount must be positive");
+                }
+                double updated = addBalance(playerId, amount);
+                return new Message("SUCCESS", "Balance updated", Double.valueOf(updated));
+            }
+
             return new Message("ERROR", "Unknown client request type: " + type);
         } catch (IOException ex) {
             return new Message("ERROR", "I/O error: " + ex.getMessage());
@@ -223,6 +266,39 @@ public class Master {
         }
         return Math.abs(gameName.hashCode()) % numWorkers;
     }
+
+    private synchronized double getBalance(String playerId) {
+        Double balance = playerBalances.get(playerId);
+        return balance == null ? 0.0 : balance.doubleValue();
+    }
+
+    private synchronized double addBalance(String playerId, double amount) {
+        if (playerId == null || playerId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Player id is required");
+        }
+        if (amount < 0.0) {
+            throw new IllegalArgumentException("Balance amount must be non-negative");
+        }
+        double updated = getBalance(playerId) + amount;
+        playerBalances.put(playerId, updated);
+        return updated;
+    }
+
+    private synchronized boolean reserveBalance(String playerId, double amount) {
+        if (playerId == null || playerId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Player id is required");
+        }
+        if (amount <= 0.0) {
+            throw new IllegalArgumentException("Bet amount must be positive");
+        }
+        double current = getBalance(playerId);
+        if (current < amount) {
+            return false;
+        }
+        playerBalances.put(playerId, current - amount);
+        return true;
+    }
+
 
     private Message sendToWorker(int workerIdx, Message request) throws IOException, ClassNotFoundException {
         synchronized (workerLocks[workerIdx]) {

@@ -1,3 +1,5 @@
+package gr.aueb.dist.shared;
+
 import java.io.Serializable;
 
 public class GameInfo implements Serializable {
@@ -80,23 +82,22 @@ public class GameInfo implements Serializable {
     public double getJackpot() {
         return jackpot;
     }
-    
+
     public boolean isActive() {
         return active;
     }
 
     @Override
     public String toString() {
-        //new
         StringBuilder starsDisplay = new StringBuilder();
         for (int i = 0; i < stars; i++) {
             starsDisplay.append("*");
-            if (i < stars - 1) { //so you dont have extra space at the end
+            if (i < stars - 1) {
                 starsDisplay.append(" ");
             }
         }
         return gameName + " [provider=" + providerName
-                + ", stars= " + starsDisplay.toString() //new
+                + ", stars= " + starsDisplay.toString()
                 + ", risk=" + riskLevel
                 + ", betCategory=" + betCategory
                 + ", min=" + minBet

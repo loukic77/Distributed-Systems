@@ -1,3 +1,8 @@
+import gr.aueb.dist.shared.BetRequest;
+import gr.aueb.dist.shared.Game;
+import gr.aueb.dist.shared.GameInfo;
+import gr.aueb.dist.shared.Message;
+import gr.aueb.dist.shared.SearchFilter;
 import java.io.*;
 import java.net.*;
 import java.util.HashMap;

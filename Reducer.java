@@ -1,3 +1,5 @@
+import gr.aueb.dist.shared.GameInfo;
+import gr.aueb.dist.shared.Message;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
